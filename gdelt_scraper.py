@@ -26,39 +26,6 @@ log_format = "%Y-%m-%d %H:%M:%S"
 # GDELT does not let you search if the interval is less than 30 minutes
 smallest_interval = 1800
 
-
-def get_data_recursively(file_path: str, timestamp_from: datetime, timestamp_to: datetime, keywords: str, language: str, timeout: float) -> None:
-    """Get data from GDELT.
-    The intervals are split recursively until the number of articles is less than 250.
-    This function will obtain more data, but is more prone to rate limiting.
-    The smallest interval is 30 minutes.
-
-    Args:
-        file_path (str): name of the .csv file to be saved
-        timestamp_from (datetime): beginning timestamp
-        timestamp_to (datetime): ending timestamp
-        keywords (str): keywords to search for
-        language (str): language to search in
-        timeout (float): timeout between requests
-    """
-
-    url = f"https://api.gdeltproject.org/api/v2/doc/doc?query={transform_keywords(keywords)}%20sourcelang:{language}&mode=ArtList&maxrecords=250&sort=DateAsc&format=json"
-    start, end = cast(tuple[datetime, datetime], pd.date_range(timestamp_from, timestamp_to, periods=2).to_pydatetime().tolist())
-    result = get_data_by_date(url, start, end, timeout)
-
-    if len(result) == 250:
-        print(f"[{timestamp_from.strftime(log_format)} - {timestamp_to.strftime(log_format)}] 250, halving")
-        start, mid, end = cast(tuple[datetime, datetime, datetime], pd.date_range(timestamp_from, timestamp_to, periods=3).to_pydatetime().tolist())
-
-        if (mid - start).total_seconds() >= smallest_interval and (end - mid).total_seconds() >= smallest_interval:
-            get_data_recursively(file_path, start, mid, keywords, language, timeout)
-            get_data_recursively(file_path, mid, end, keywords, language, timeout)
-            return
-
-    result.to_csv(file_path, encoding="utf-8", index=False, header=not os.path.exists(file_path), mode="a")
-    print(f"[{timestamp_from.strftime(log_format)} - {timestamp_to.strftime(log_format)}] {result.shape[0]}, saving")
-
-
 def get_data_iteratively(file_path: str, timestamp_from: datetime, timestamp_to: datetime, keywords: str, language: str, timeout: float, freq: str) -> None:
     """Get data from GDELT.
     The intervals are split by the given frequency.
@@ -223,7 +190,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-f", "--from", type=transform_string_to_iso_datetime, default=transform_string_to_iso_datetime("2019-09-01"), dest="from_", help=f"Beginning date or timestamp in ISO format ({log_format} or {file_name_format})")
     parser.add_argument("-t", "--to", type=transform_string_to_iso_datetime, default=transform_string_to_iso_datetime("2022-03-24"), help=f"Ending date or timestamp in ISO format ({log_format} or {file_name_format})")
     parser.add_argument("-to", "--timeout", type=float, default=0.5, help="Timeout in seconds")
-    parser.add_argument("-s", "--strategy", type=str, default="recursive", help="Strategy to use when scraping (r for recursive, i for iterative)")
     parser.add_argument("-freq", "--frequency", type=str, default="1D", help="Frequency to use when scraping (1D, 12H, etc. See pandas docs for more info)")
 
     return parser.parse_args()
@@ -240,7 +206,6 @@ def main() -> None:
     date_from: datetime = args.from_
     date_to: datetime = args.to
     timeout: float = args.timeout
-    strategy: str = args.strategy
     frequency: str = args.frequency
 
     if name is None:
@@ -249,25 +214,14 @@ def main() -> None:
     if not os.path.exists("./results"):
         os.makedirs("./results", exist_ok=True)
 
-    strategy = strategy.lower()
-
-    if strategy == "r":
-        strategy = "recursive"
-    elif strategy == "i":
-        strategy = "iterative"
-    if strategy != "recursive" and strategy != "iterative":
-        strategy = "recursive"
 
     # recommended file name
     file_path = os.path.join("results", f"GDELT_{name}_{date_from.strftime(file_name_format)}_{date_to.strftime(file_name_format)}.csv")
 
     print(f"Getting data for keywords {keywords} between {date_from.strftime(log_format)} and {date_to.strftime(log_format)} in language {language} with timeout {timeout} seconds and strategy {strategy}")
 
-    if strategy == "iterative":
-        get_data_iteratively(file_path, date_from, date_to, keywords, language, timeout, frequency)
-    else:
-        get_data_recursively(file_path, date_from, date_to, keywords, language, timeout)
-
+    get_data_iteratively(file_path, date_from, date_to, keywords, language, timeout, frequency)
+    
     print(f"Done. Saved to {file_path}")
 
 
